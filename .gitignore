@@ -1,0 +1,15 @@
+# local config — carries the LUKS passphrase and host-specific values
+.env
+
+# build evidence / outputs (generated per build)
+verify/
+verify-pass*/
+*.img
+*.img.gz
+
+# superseded two-volume flow (kept local only)
+legacy/
+
+# misc
+*.log
+.DS_Store
