@@ -35,6 +35,30 @@ measurement never receives the key.
 | `sealed_03_flash.sh` | control host | streams the image onto the instance's disk from an attached volume (no network transfer) |
 | `sealed_04_verify.sh` | inside the VM | post-boot check: SNP report vs the pin + live dm-verity status |
 
+## Build host
+
+`sealed_build.sh` must run on a **Linux x86_64 machine with root** — it uses loop devices,
+dm-crypt, dm-verity and chroot (none of which exist on macOS) and produces an amd64 image,
+so an Apple-Silicon Mac cannot build it. You also need **two disks**: the flash **target**
+(the instance's OS disk) and a **second volume** that holds the build inputs and the output
+image — you can't flash the disk the image itself lives on. Size the volume ~60G for a
+minimal image, ~200G with engine + weights baked.
+
+**Trust boundary.** The build is the only moment the model weights exist in plaintext.
+Build somewhere you trust that: either your own environment (then ship only the sealed
+image), or a Verda **CC instance**, where the plaintext lives in SEV-SNP-encrypted RAM —
+keep `WEIGHTS_SRC` in `tmpfs` so only the LUKS-encrypted image ever touches the volume.
+
+**Building on a CC CPU instance.** The build needs CPU/RAM/disk, **not a GPU**, so a cheaper
+CPU-only CC instance is an ideal builder and still gives the encrypted-RAM trust boundary:
+- Bake the driver with `DRIVER_INSTALL_CMD` (apt-install the matching NVIDIA open driver in
+  the image chroot — building the module needs no GPU), since `DRIVER_COPY` has nothing to
+  copy on a GPU-less host.
+- Set `VCPUS` and `CMDLINE` to the **GPU target's** values — that is what the image will
+  boot with, and what the measurement must be computed against — not the builder's.
+- Flow: build on the CC CPU instance → move the volume (or copy the image) to the GPU CC
+  instance → `sealed_02_rescue` + `sealed_03_flash` there → boot + attest-unlock.
+
 ## Steps
 
 ```bash
