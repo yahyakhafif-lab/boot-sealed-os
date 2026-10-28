@@ -37,7 +37,7 @@ measurement never receives the key.
 
 ## Build host
 
-`sealed_build.sh` must run on a **Linux x86_64 machine with root** — it uses loop devices,
+`sealed_build.sh` must run on a **Linux x86_64 machine with root**, it uses loop devices,
 dm-crypt, dm-verity and chroot (none of which exist on macOS) and produces an amd64 image,
 so an Apple-Silicon Mac cannot build it. You also need **two disks**: the flash **target**
 (the instance's OS disk) and a **second volume** that holds the build inputs and the output
@@ -83,13 +83,22 @@ OVMF_PATH=/path/to/OVMF.amdsev.fd VCPUS=<n> ./sealed_01_measure.sh
 #    then, in the console: Start
 #    -> boots into the attest-unlock initramfs (dropbear + SNP report on :ATTEST_PORT)
 
-# 5. attest & release the key          [the verifier]
+# 5. attest & release the key   [control host / verifier — MANUAL: run these by hand]
+#    This step is NOT scripted. In production your key broker / Vault automates exactly
+#    these checks and holds the passphrase. Run them yourself:
 curl -s http://<instance>:9000/report.bin  -o report.bin
 curl -s http://<instance>:9000/hostkey.pub -o hostkey.pub
-#    check: report measurement (bytes 0x90..0xC0) == allow-list.expected_measurement
-#           report_data        (bytes 0x50..0x90) == sha512(hostkey.pub, newlines stripped)
-#    if both match, release the passphrase over the initramfs dropbear:
-ssh root@<instance> 'printf "%s" "<LUKS_PASS>" | cryptroot-unlock'
+#    check the report against the pin — BOTH lines must print MATCH:
+python3 - report.bin hostkey.pub verify/allow-list.json <<'EOF'
+import sys, json, hashlib
+rpt = open(sys.argv[1], 'rb').read()
+hk  = open(sys.argv[2], 'rb').read().replace(b'\n', b'')
+exp = json.load(open(sys.argv[3]))['expected_measurement'].upper()
+print('measurement', 'MATCH' if rpt[0x90:0x90+48].hex().upper() == exp else 'MISMATCH')
+print('endpoint   ', 'MATCH' if rpt[0x50:0x50+64].hex().upper() == hashlib.sha512(hk).hexdigest().upper() else 'MISMATCH')
+EOF
+#    ONLY if both say MATCH, release the passphrase over the initramfs dropbear:
+printf '%s' '<LUKS_PASS>' | ssh root@<instance> 'cryptroot-unlock'
 #    -> root unlocks (LUKS -> dm-verity), the sealed OS boots
 
 # 6. verify (optional)                 [inside the VM]
